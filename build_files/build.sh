@@ -2,20 +2,46 @@
 
 set -ouex pipefail
 
-# Copia eventuali file personalizzati
 cp -avf "/ctx/system_files"/. /
 
-# Abilita il repository Mesa Git
+# Rimuove il blocco Bazzite sulla versione di Mesa
+dnf5 versionlock delete 'mesa-*' || true
+
+# Abilita Mesa Git
 dnf5 -y copr enable xxmitsu/mesa-git
 
-# Aggiorna tutto lo stack Mesa
-dnf5 -y distro-sync --refresh --allowerasing
+# Installa/sincronizza Mesa Git ignorando le esclusioni di Bazzite
+dnf5 -y \
+    --setopt=disable_excludes='*' \
+    distro-sync \
+    --refresh \
+    --allowerasing \
+    'mesa-*'
 
-# Disabilita il repository dopo l'installazione
+# Blocca la versione Mesa installata nell'immagine
+dnf5 versionlock add 'mesa-*'
+
+# Disabilita il COPR Mesa Git nell'immagine finale
 dnf5 -y copr disable xxmitsu/mesa-git
 
-# Mostra le versioni installate durante la build
+# Verifica versioni Mesa
 rpm -qa | grep '^mesa' | sort
 
-# Mantiene il servizio previsto dal template
+# Disabilita terra-mesa tramite override DNF
+dnf5 -y config-manager setopt terra-mesa.enabled=0 || true
+dnf5 -y config-manager setopt terra-mesa-source.enabled=0 || true
+
+# Disabilita anche direttamente le sezioni nel file .repo.
+# bootc-image-builder può leggere direttamente questi file durante il depsolve ISO.
+if [[ -f /etc/yum.repos.d/terra-mesa.repo ]]; then
+    sed -i '/^\[terra-mesa\]/,/^\[/ s/^enabled=.*/enabled=0/' \
+        /etc/yum.repos.d/terra-mesa.repo
+
+    sed -i '/^\[terra-mesa-source\]/,/^\[/ s/^enabled=.*/enabled=0/' \
+        /etc/yum.repos.d/terra-mesa.repo
+fi
+
+# Controllo finale dello stato dei repo Terra
+dnf5 repolist --all | grep -i terra || true
+
 systemctl enable podman.socket
